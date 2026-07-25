@@ -51,6 +51,10 @@ const MARKER_COLORS: Record<string, string> = {
   "purple-blue": "#5b6abf",
 };
 
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
 function computeImageBounds(
   container: HTMLElement,
   img: HTMLImageElement,
@@ -94,10 +98,13 @@ export default function Home() {
   const [searchQuery, setSearchQuery] = useState("");
   const [placedPlants, setPlacedPlants] = useState<PlacedPlant[]>([]);
   const [selectedPlant, setSelectedPlant] = useState<Plant | null>(null);
+  const [draggingPlantId, setDraggingPlantId] = useState<string | null>(null);
   const [imageBounds, setImageBounds] = useState<ImageBounds | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const photoAreaRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
+  const overlayRef = useRef<HTMLDivElement>(null);
+  const suppressPhotoClickRef = useRef(false);
 
   const filteredPlants = PLANTS.filter((plant) =>
     plant.commonName.toLowerCase().includes(searchQuery.toLowerCase()),
@@ -129,6 +136,46 @@ export default function Home() {
     };
   }, [imageUrl]);
 
+  useEffect(() => {
+    if (!draggingPlantId) return;
+
+    function handlePointerMove(event: PointerEvent) {
+      if (!overlayRef.current) return;
+
+      const rect = overlayRef.current.getBoundingClientRect();
+      const xPercent = clamp(
+        ((event.clientX - rect.left) / rect.width) * 100,
+        0,
+        100,
+      );
+      const yPercent = clamp(
+        ((event.clientY - rect.top) / rect.height) * 100,
+        0,
+        100,
+      );
+
+      setPlacedPlants((current) =>
+        current.map((plant) =>
+          plant.id === draggingPlantId
+            ? { ...plant, x: xPercent, y: yPercent }
+            : plant,
+        ),
+      );
+      suppressPhotoClickRef.current = true;
+    }
+
+    function handlePointerUp() {
+      setDraggingPlantId(null);
+    }
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    };
+  }, [draggingPlantId]);
+
   function openFilePicker() {
     fileInputRef.current?.click();
   }
@@ -144,6 +191,7 @@ export default function Home() {
     setImageUrl(URL.createObjectURL(file));
     setPlacedPlants([]);
     setSelectedPlant(null);
+    setDraggingPlantId(null);
   }
 
   function handlePlantSelect(plant: Plant) {
@@ -151,8 +199,22 @@ export default function Home() {
     setSelectedPlant(plant);
   }
 
+  function handleMarkerPointerDown(
+    event: React.PointerEvent<HTMLDivElement>,
+    plantId: string,
+  ) {
+    event.stopPropagation();
+    suppressPhotoClickRef.current = false;
+    setDraggingPlantId(plantId);
+  }
+
   function handlePhotoClick(event: React.MouseEvent<HTMLDivElement>) {
     if (!selectedPlant || !imageBounds) return;
+
+    if (suppressPhotoClickRef.current) {
+      suppressPhotoClickRef.current = false;
+      return;
+    }
 
     const overlayRect = event.currentTarget.getBoundingClientRect();
     const clickX = event.clientX - overlayRect.left;
@@ -284,25 +346,38 @@ export default function Home() {
 
                 {imageBounds && (
                   <div
+                    ref={overlayRef}
                     className="absolute z-10"
                     style={{
                       left: imageBounds.left,
                       top: imageBounds.top,
                       width: imageBounds.width,
                       height: imageBounds.height,
-                      cursor: selectedPlant ? "crosshair" : "default",
+                      cursor: draggingPlantId
+                        ? "grabbing"
+                        : selectedPlant
+                          ? "crosshair"
+                          : "default",
                     }}
                     onClick={handlePhotoClick}
                   >
                     {placedPlants.map((plant) => (
                       <div
                         key={plant.id}
-                        className="pointer-events-none absolute flex flex-col items-center"
+                        className={`absolute flex touch-none flex-col items-center ${
+                          draggingPlantId === plant.id
+                            ? "cursor-grabbing"
+                            : "cursor-grab"
+                        }`}
                         style={{
                           left: `${plant.x}%`,
                           top: `${plant.y}%`,
                           transform: "translate(-50%, -50%)",
                         }}
+                        onPointerDown={(event) =>
+                          handleMarkerPointerDown(event, plant.id)
+                        }
+                        onClick={(event) => event.stopPropagation()}
                       >
                         <div
                           className="h-12 w-12 rounded-full border-2 border-white shadow-md"
