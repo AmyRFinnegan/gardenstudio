@@ -9,22 +9,15 @@ import Header from "@/components/Header";
 import PlantLibrary from "@/components/PlantLibrary";
 import { PLANTS, type PlacedPlant, type Plant } from "@/lib/plants";
 
-function clamp(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, value));
-}
-
 export default function Home() {
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [placedPlants, setPlacedPlants] = useState<PlacedPlant[]>([]);
   const [selectedPlant, setSelectedPlant] = useState<Plant | null>(null);
-  const [draggingPlantId, setDraggingPlantId] = useState<string | null>(null);
   const [imageBounds, setImageBounds] = useState<ImageBounds | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const photoAreaRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
-  const overlayRef = useRef<HTMLDivElement>(null);
-  const suppressPhotoClickRef = useRef(false);
 
   const filteredPlants = PLANTS.filter((plant) =>
     plant.commonName.toLowerCase().includes(searchQuery.toLowerCase()),
@@ -56,46 +49,6 @@ export default function Home() {
     };
   }, [imageUrl]);
 
-  useEffect(() => {
-    if (!draggingPlantId) return;
-
-    function handlePointerMove(event: PointerEvent) {
-      if (!overlayRef.current) return;
-
-      const rect = overlayRef.current.getBoundingClientRect();
-      const xPercent = clamp(
-        ((event.clientX - rect.left) / rect.width) * 100,
-        0,
-        100,
-      );
-      const yPercent = clamp(
-        ((event.clientY - rect.top) / rect.height) * 100,
-        0,
-        100,
-      );
-
-      setPlacedPlants((current) =>
-        current.map((plant) =>
-          plant.id === draggingPlantId
-            ? { ...plant, x: xPercent, y: yPercent }
-            : plant,
-        ),
-      );
-      suppressPhotoClickRef.current = true;
-    }
-
-    function handlePointerUp() {
-      setDraggingPlantId(null);
-    }
-
-    window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", handlePointerUp);
-    return () => {
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", handlePointerUp);
-    };
-  }, [draggingPlantId]);
-
   function openFilePicker() {
     fileInputRef.current?.click();
   }
@@ -111,7 +64,6 @@ export default function Home() {
     setImageUrl(URL.createObjectURL(file));
     setPlacedPlants([]);
     setSelectedPlant(null);
-    setDraggingPlantId(null);
   }
 
   function handlePlantSelect(plant: Plant) {
@@ -119,22 +71,20 @@ export default function Home() {
     setSelectedPlant(plant);
   }
 
-  function handleMarkerPointerDown(
-    event: React.PointerEvent<HTMLDivElement>,
+  function handleUpdatePlacedPlant(
     plantId: string,
+    xPercent: number,
+    yPercent: number,
   ) {
-    event.stopPropagation();
-    suppressPhotoClickRef.current = false;
-    setDraggingPlantId(plantId);
+    setPlacedPlants((current) =>
+      current.map((plant) =>
+        plant.id === plantId ? { ...plant, x: xPercent, y: yPercent } : plant,
+      ),
+    );
   }
 
   function handlePhotoClick(event: React.MouseEvent<HTMLDivElement>) {
     if (!selectedPlant || !imageBounds) return;
-
-    if (suppressPhotoClickRef.current) {
-      suppressPhotoClickRef.current = false;
-      return;
-    }
 
     const overlayRect = event.currentTarget.getBoundingClientRect();
     const clickX = event.clientX - overlayRect.left;
@@ -174,17 +124,15 @@ export default function Home() {
           imageUrl={imageUrl}
           selectedPlant={selectedPlant}
           placedPlants={placedPlants}
-          draggingPlantId={draggingPlantId}
           imageBounds={imageBounds}
           fileInputRef={fileInputRef}
           photoAreaRef={photoAreaRef}
           imageRef={imageRef}
-          overlayRef={overlayRef}
           onFileChange={handleFileChange}
           onOpenFilePicker={openFilePicker}
           onUpdateImageBounds={updateImageBounds}
           onPhotoClick={handlePhotoClick}
-          onMarkerPointerDown={handleMarkerPointerDown}
+          onUpdatePlacedPlant={handleUpdatePlacedPlant}
         />
       </div>
     </div>

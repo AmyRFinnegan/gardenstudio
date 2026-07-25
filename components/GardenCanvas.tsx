@@ -1,5 +1,9 @@
-import { type RefObject } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { MARKER_COLORS, type PlacedPlant, type Plant } from "@/lib/plants";
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
 
 export type ImageBounds = {
   left: number;
@@ -12,20 +16,15 @@ type GardenCanvasProps = {
   imageUrl: string | null;
   selectedPlant: Plant | null;
   placedPlants: PlacedPlant[];
-  draggingPlantId: string | null;
   imageBounds: ImageBounds | null;
   fileInputRef: RefObject<HTMLInputElement | null>;
   photoAreaRef: RefObject<HTMLDivElement | null>;
   imageRef: RefObject<HTMLImageElement | null>;
-  overlayRef: RefObject<HTMLDivElement | null>;
   onFileChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
   onOpenFilePicker: () => void;
   onUpdateImageBounds: () => void;
   onPhotoClick: (event: React.MouseEvent<HTMLDivElement>) => void;
-  onMarkerPointerDown: (
-    event: React.PointerEvent<HTMLDivElement>,
-    plantId: string,
-  ) => void;
+  onUpdatePlacedPlant: (plantId: string, xPercent: number, yPercent: number) => void;
 };
 
 export function computeImageBounds(
@@ -70,18 +69,91 @@ export default function GardenCanvas({
   imageUrl,
   selectedPlant,
   placedPlants,
-  draggingPlantId,
   imageBounds,
   fileInputRef,
   photoAreaRef,
   imageRef,
-  overlayRef,
   onFileChange,
   onOpenFilePicker,
   onUpdateImageBounds,
   onPhotoClick,
-  onMarkerPointerDown,
+  onUpdatePlacedPlant,
 }: GardenCanvasProps) {
+  const overlayRef = useRef<HTMLDivElement>(null);
+  const suppressPhotoClickRef = useRef(false);
+  const onUpdatePlacedPlantRef = useRef(onUpdatePlacedPlant);
+  const [draggingPlantId, setDraggingPlantId] = useState<string | null>(null);
+
+  onUpdatePlacedPlantRef.current = onUpdatePlacedPlant;
+
+  useEffect(() => {
+    if (!draggingPlantId) return;
+
+    function handlePointerMove(event: PointerEvent) {
+      if (!overlayRef.current) return;
+
+      const rect = overlayRef.current.getBoundingClientRect();
+      const xPercent = clamp(
+        ((event.clientX - rect.left) / rect.width) * 100,
+        0,
+        100,
+      );
+      const yPercent = clamp(
+        ((event.clientY - rect.top) / rect.height) * 100,
+        0,
+        100,
+      );
+
+      onUpdatePlacedPlantRef.current(draggingPlantId, xPercent, yPercent);
+      suppressPhotoClickRef.current = true;
+    }
+
+    function handlePointerUp(event: PointerEvent) {
+      if (!overlayRef.current || !draggingPlantId) return;
+
+      const rect = overlayRef.current.getBoundingClientRect();
+      const xPercent = clamp(
+        ((event.clientX - rect.left) / rect.width) * 100,
+        0,
+        100,
+      );
+      const yPercent = clamp(
+        ((event.clientY - rect.top) / rect.height) * 100,
+        0,
+        100,
+      );
+
+      onUpdatePlacedPlantRef.current(draggingPlantId, xPercent, yPercent);
+      suppressPhotoClickRef.current = true;
+      setDraggingPlantId(null);
+    }
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    };
+  }, [draggingPlantId]);
+
+  function handleMarkerPointerDown(
+    event: React.PointerEvent<HTMLDivElement>,
+    plantId: string,
+  ) {
+    event.stopPropagation();
+    event.preventDefault();
+    suppressPhotoClickRef.current = false;
+    setDraggingPlantId(plantId);
+  }
+
+  function handlePhotoClick(event: React.MouseEvent<HTMLDivElement>) {
+    if (suppressPhotoClickRef.current) {
+      suppressPhotoClickRef.current = false;
+      return;
+    }
+    onPhotoClick(event);
+  }
+
   return (
     <main className="flex min-h-0 flex-1 flex-col p-8">
       {selectedPlant && (
@@ -92,7 +164,7 @@ export default function GardenCanvas({
 
       <div
         ref={photoAreaRef}
-        className="relative flex min-h-0 flex-1 flex-col items-center justify-center overflow-hidden rounded-lg border-2 border-stone-300 bg-[#f5f0e6]/50 p-12 shadow-inner"
+        className="relative flex min-h-0 flex-1 select-none flex-col items-center justify-center overflow-hidden rounded-lg border-2 border-stone-300 bg-[#f5f0e6]/50 p-12 shadow-inner"
       >
         <input
           ref={fileInputRef}
@@ -108,6 +180,7 @@ export default function GardenCanvas({
               ref={imageRef}
               src={imageUrl}
               alt="Uploaded garden photo"
+              draggable={false}
               onLoad={onUpdateImageBounds}
               className="absolute inset-0 h-full w-full object-contain p-4"
             />
@@ -127,12 +200,12 @@ export default function GardenCanvas({
                       ? "crosshair"
                       : "default",
                 }}
-                onClick={onPhotoClick}
+                onClick={handlePhotoClick}
               >
                 {placedPlants.map((plant) => (
                   <div
                     key={plant.id}
-                    className={`absolute flex touch-none flex-col items-center ${
+                    className={`absolute flex touch-none select-none flex-col items-center ${
                       draggingPlantId === plant.id
                         ? "cursor-grabbing"
                         : "cursor-grab"
@@ -143,7 +216,7 @@ export default function GardenCanvas({
                       transform: "translate(-50%, -50%)",
                     }}
                     onPointerDown={(event) =>
-                      onMarkerPointerDown(event, plant.id)
+                      handleMarkerPointerDown(event, plant.id)
                     }
                     onClick={(event) => event.stopPropagation()}
                   >
