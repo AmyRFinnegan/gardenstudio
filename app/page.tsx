@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 type Plant = {
   id: string;
@@ -15,6 +15,13 @@ type PlacedPlant = {
   color: string;
   x: number;
   y: number;
+};
+
+type ImageBounds = {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
 };
 
 const PLANTS: Plant[] = [
@@ -44,17 +51,83 @@ const MARKER_COLORS: Record<string, string> = {
   "purple-blue": "#5b6abf",
 };
 
-let placedPlantCounter = 0;
+function computeImageBounds(
+  container: HTMLElement,
+  img: HTMLImageElement,
+): ImageBounds | null {
+  const naturalWidth = img.naturalWidth;
+  const naturalHeight = img.naturalHeight;
+  if (!naturalWidth || !naturalHeight) return null;
+
+  const containerRect = container.getBoundingClientRect();
+  const imgRect = img.getBoundingClientRect();
+  const style = window.getComputedStyle(img);
+
+  const paddingLeft = parseFloat(style.paddingLeft);
+  const paddingRight = parseFloat(style.paddingRight);
+  const paddingTop = parseFloat(style.paddingTop);
+  const paddingBottom = parseFloat(style.paddingBottom);
+
+  const contentWidth = imgRect.width - paddingLeft - paddingRight;
+  const contentHeight = imgRect.height - paddingTop - paddingBottom;
+
+  const scale = Math.min(
+    contentWidth / naturalWidth,
+    contentHeight / naturalHeight,
+  );
+  const displayWidth = naturalWidth * scale;
+  const displayHeight = naturalHeight * scale;
+
+  const offsetX = paddingLeft + (contentWidth - displayWidth) / 2;
+  const offsetY = paddingTop + (contentHeight - displayHeight) / 2;
+
+  return {
+    left: imgRect.left - containerRect.left + offsetX,
+    top: imgRect.top - containerRect.top + offsetY,
+    width: displayWidth,
+    height: displayHeight,
+  };
+}
 
 export default function Home() {
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [placedPlants, setPlacedPlants] = useState<PlacedPlant[]>([]);
+  const [selectedPlant, setSelectedPlant] = useState<Plant | null>(null);
+  const [imageBounds, setImageBounds] = useState<ImageBounds | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const photoAreaRef = useRef<HTMLDivElement>(null);
+  const imageRef = useRef<HTMLImageElement>(null);
 
   const filteredPlants = PLANTS.filter((plant) =>
     plant.commonName.toLowerCase().includes(searchQuery.toLowerCase()),
   );
+
+  function updateImageBounds() {
+    if (!photoAreaRef.current || !imageRef.current) return;
+    const bounds = computeImageBounds(photoAreaRef.current, imageRef.current);
+    setImageBounds(bounds);
+  }
+
+  useEffect(() => {
+    if (!imageUrl) {
+      setImageBounds(null);
+      return;
+    }
+
+    updateImageBounds();
+
+    const observer = new ResizeObserver(updateImageBounds);
+    if (photoAreaRef.current) {
+      observer.observe(photoAreaRef.current);
+    }
+
+    window.addEventListener("resize", updateImageBounds);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", updateImageBounds);
+    };
+  }, [imageUrl]);
 
   function openFilePicker() {
     fileInputRef.current?.click();
@@ -70,24 +143,35 @@ export default function Home() {
 
     setImageUrl(URL.createObjectURL(file));
     setPlacedPlants([]);
+    setSelectedPlant(null);
   }
 
-  function handlePlantClick(plant: Plant) {
+  function handlePlantSelect(plant: Plant) {
     if (!imageUrl) return;
+    setSelectedPlant(plant);
+  }
 
-    placedPlantCounter += 1;
-    const offset = (placedPlantCounter - 1) * 4;
+  function handlePhotoClick(event: React.MouseEvent<HTMLDivElement>) {
+    if (!selectedPlant || !imageBounds) return;
+
+    const overlayRect = event.currentTarget.getBoundingClientRect();
+    const clickX = event.clientX - overlayRect.left;
+    const clickY = event.clientY - overlayRect.top;
+
+    const xPercent = (clickX / overlayRect.width) * 100;
+    const yPercent = (clickY / overlayRect.height) * 100;
 
     setPlacedPlants((current) => [
       ...current,
       {
-        id: `${plant.id}-${Date.now()}`,
-        commonName: plant.commonName,
-        color: plant.color,
-        x: 50 + (offset % 3) * 2 - 2,
-        y: 50 + Math.floor(offset / 3) * 2 - 2,
+        id: `${selectedPlant.id}-${Date.now()}`,
+        commonName: selectedPlant.commonName,
+        color: selectedPlant.color,
+        x: xPercent,
+        y: yPercent,
       },
     ]);
+    setSelectedPlant(null);
   }
 
   return (
@@ -127,42 +211,59 @@ export default function Home() {
                   No plants match your search.
                 </li>
               ) : (
-                filteredPlants.map((plant) => (
-                  <li key={plant.id}>
-                    <button
-                      type="button"
-                      disabled={!imageUrl}
-                      onClick={() => handlePlantClick(plant)}
-                      className="w-full rounded-md border border-stone-300 bg-white px-4 py-3 text-left shadow-sm transition-colors focus:outline-none focus:ring-2 focus:ring-[#4a7c59] focus:ring-offset-2 enabled:hover:border-[#4a7c59] enabled:hover:bg-[#faf7f0] disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      <div className="flex items-start gap-3">
-                        <span
-                          className="mt-0.5 h-4 w-4 shrink-0 rounded-full border border-stone-300"
-                          style={{
-                            backgroundColor:
-                              MARKER_COLORS[plant.color] ?? "#4a7c59",
-                          }}
-                        />
-                        <div>
-                          <p className="text-sm font-medium text-stone-800">
-                            {plant.commonName}
-                          </p>
-                          <p className="mt-1 text-xs text-stone-500">
-                            Mature width: {plant.matureWidthFt} ft ·{" "}
-                            {plant.color}
-                          </p>
+                filteredPlants.map((plant) => {
+                  const isSelected = selectedPlant?.id === plant.id;
+
+                  return (
+                    <li key={plant.id}>
+                      <button
+                        type="button"
+                        disabled={!imageUrl}
+                        onClick={() => handlePlantSelect(plant)}
+                        className={`w-full rounded-md border px-4 py-3 text-left shadow-sm transition-colors focus:outline-none focus:ring-2 focus:ring-[#4a7c59] focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 enabled:hover:border-[#4a7c59] enabled:hover:bg-[#faf7f0] ${
+                          isSelected
+                            ? "border-[#4a7c59] bg-[#faf7f0] ring-2 ring-[#4a7c59]/30"
+                            : "border-stone-300 bg-white"
+                        }`}
+                      >
+                        <div className="flex items-start gap-3">
+                          <span
+                            className="mt-0.5 h-4 w-4 shrink-0 rounded-full border border-stone-300"
+                            style={{
+                              backgroundColor:
+                                MARKER_COLORS[plant.color] ?? "#4a7c59",
+                            }}
+                          />
+                          <div>
+                            <p className="text-sm font-medium text-stone-800">
+                              {plant.commonName}
+                            </p>
+                            <p className="mt-1 text-xs text-stone-500">
+                              Mature width: {plant.matureWidthFt} ft ·{" "}
+                              {plant.color}
+                            </p>
+                          </div>
                         </div>
-                      </div>
-                    </button>
-                  </li>
-                ))
+                      </button>
+                    </li>
+                  );
+                })
               )}
             </ul>
           </div>
         </aside>
 
         <main className="flex min-h-0 flex-1 flex-col p-8">
-          <div className="relative flex min-h-0 flex-1 flex-col items-center justify-center overflow-hidden rounded-lg border-2 border-stone-300 bg-[#f5f0e6]/50 p-12 shadow-inner">
+          {selectedPlant && (
+            <p className="mb-3 text-sm text-[#1e4620]">
+              Click on the photo to place {selectedPlant.commonName}.
+            </p>
+          )}
+
+          <div
+            ref={photoAreaRef}
+            className="relative flex min-h-0 flex-1 flex-col items-center justify-center overflow-hidden rounded-lg border-2 border-stone-300 bg-[#f5f0e6]/50 p-12 shadow-inner"
+          >
             <input
               ref={fileInputRef}
               type="file"
@@ -174,33 +275,49 @@ export default function Home() {
             {imageUrl ? (
               <>
                 <img
+                  ref={imageRef}
                   src={imageUrl}
                   alt="Uploaded garden photo"
+                  onLoad={updateImageBounds}
                   className="absolute inset-0 h-full w-full object-contain p-4"
                 />
 
-                {placedPlants.map((plant) => (
+                {imageBounds && (
                   <div
-                    key={plant.id}
-                    className="pointer-events-none absolute z-10 flex flex-col items-center"
+                    className="absolute z-10"
                     style={{
-                      left: `${plant.x}%`,
-                      top: `${plant.y}%`,
-                      transform: "translate(-50%, -50%)",
+                      left: imageBounds.left,
+                      top: imageBounds.top,
+                      width: imageBounds.width,
+                      height: imageBounds.height,
+                      cursor: selectedPlant ? "crosshair" : "default",
                     }}
+                    onClick={handlePhotoClick}
                   >
-                    <div
-                      className="h-12 w-12 rounded-full border-2 border-white shadow-md"
-                      style={{
-                        backgroundColor:
-                          MARKER_COLORS[plant.color] ?? "#4a7c59",
-                      }}
-                    />
-                    <span className="mt-1 max-w-28 rounded bg-white/90 px-1.5 py-0.5 text-center text-[10px] font-medium leading-tight text-stone-800 shadow-sm">
-                      {plant.commonName}
-                    </span>
+                    {placedPlants.map((plant) => (
+                      <div
+                        key={plant.id}
+                        className="pointer-events-none absolute flex flex-col items-center"
+                        style={{
+                          left: `${plant.x}%`,
+                          top: `${plant.y}%`,
+                          transform: "translate(-50%, -50%)",
+                        }}
+                      >
+                        <div
+                          className="h-12 w-12 rounded-full border-2 border-white shadow-md"
+                          style={{
+                            backgroundColor:
+                              MARKER_COLORS[plant.color] ?? "#4a7c59",
+                          }}
+                        />
+                        <span className="mt-1 max-w-28 rounded bg-white/90 px-1.5 py-0.5 text-center text-[10px] font-medium leading-tight text-stone-800 shadow-sm">
+                          {plant.commonName}
+                        </span>
+                      </div>
+                    ))}
                   </div>
-                ))}
+                )}
 
                 <button
                   type="button"
