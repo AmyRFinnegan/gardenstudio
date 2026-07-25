@@ -15,6 +15,7 @@ export type ImageBounds = {
 type GardenCanvasProps = {
   imageUrl: string | null;
   selectedPlant: Plant | null;
+  selectedMarkerId: string | null;
   placedPlants: PlacedPlant[];
   imageBounds: ImageBounds | null;
   fileInputRef: RefObject<HTMLInputElement | null>;
@@ -25,6 +26,8 @@ type GardenCanvasProps = {
   onUpdateImageBounds: () => void;
   onPhotoClick: (event: React.MouseEvent<HTMLDivElement>) => void;
   onUpdatePlacedPlant: (plantId: string, xPercent: number, yPercent: number) => void;
+  onSelectMarker: (plantId: string) => void;
+  onDeleteSelectedMarker: () => void;
 };
 
 export function computeImageBounds(
@@ -68,6 +71,7 @@ export function computeImageBounds(
 export default function GardenCanvas({
   imageUrl,
   selectedPlant,
+  selectedMarkerId,
   placedPlants,
   imageBounds,
   fileInputRef,
@@ -78,9 +82,12 @@ export default function GardenCanvas({
   onUpdateImageBounds,
   onPhotoClick,
   onUpdatePlacedPlant,
+  onSelectMarker,
+  onDeleteSelectedMarker,
 }: GardenCanvasProps) {
   const overlayRef = useRef<HTMLDivElement>(null);
   const suppressPhotoClickRef = useRef(false);
+  const didDragRef = useRef(false);
   const onUpdatePlacedPlantRef = useRef(onUpdatePlacedPlant);
   const [draggingPlantId, setDraggingPlantId] = useState<string | null>(null);
 
@@ -105,6 +112,7 @@ export default function GardenCanvas({
       );
 
       onUpdatePlacedPlantRef.current(draggingPlantId, xPercent, yPercent);
+      didDragRef.current = true;
       suppressPhotoClickRef.current = true;
     }
 
@@ -142,8 +150,21 @@ export default function GardenCanvas({
   ) {
     event.stopPropagation();
     event.preventDefault();
+    didDragRef.current = false;
     suppressPhotoClickRef.current = false;
     setDraggingPlantId(plantId);
+  }
+
+  function handleMarkerClick(
+    event: React.MouseEvent<HTMLDivElement>,
+    plantId: string,
+  ) {
+    event.stopPropagation();
+    if (didDragRef.current) {
+      didDragRef.current = false;
+      return;
+    }
+    onSelectMarker(plantId);
   }
 
   function handlePhotoClick(event: React.MouseEvent<HTMLDivElement>) {
@@ -156,11 +177,22 @@ export default function GardenCanvas({
 
   return (
     <main className="flex min-h-0 flex-1 flex-col p-8">
-      {selectedPlant && (
-        <p className="mb-3 text-sm text-[#1e4620]">
-          Click on the photo to place {selectedPlant.commonName}.
-        </p>
-      )}
+      <div className="mb-3 flex min-h-[1.25rem] items-center gap-3">
+        {selectedPlant && (
+          <p className="text-sm text-[#1e4620]">
+            Click on the photo to place {selectedPlant.commonName}.
+          </p>
+        )}
+        {selectedMarkerId && (
+          <button
+            type="button"
+            onClick={onDeleteSelectedMarker}
+            className="rounded-md border border-stone-300 bg-white px-3 py-1 text-xs font-medium text-stone-700 shadow-sm transition-colors hover:border-red-300 hover:bg-red-50 hover:text-red-700 focus:outline-none focus:ring-2 focus:ring-[#4a7c59] focus:ring-offset-2"
+          >
+            Delete
+          </button>
+        )}
+      </div>
 
       <div
         ref={photoAreaRef}
@@ -202,36 +234,44 @@ export default function GardenCanvas({
                 }}
                 onClick={handlePhotoClick}
               >
-                {placedPlants.map((plant) => (
-                  <div
-                    key={plant.id}
-                    className={`absolute flex touch-none select-none flex-col items-center ${
-                      draggingPlantId === plant.id
-                        ? "cursor-grabbing"
-                        : "cursor-grab"
-                    }`}
-                    style={{
-                      left: `${plant.x}%`,
-                      top: `${plant.y}%`,
-                      transform: "translate(-50%, -50%)",
-                    }}
-                    onPointerDown={(event) =>
-                      handleMarkerPointerDown(event, plant.id)
-                    }
-                    onClick={(event) => event.stopPropagation()}
-                  >
+                {placedPlants.map((plant) => {
+                  const isSelected = selectedMarkerId === plant.id;
+
+                  return (
                     <div
-                      className="h-12 w-12 rounded-full border-2 border-white shadow-md"
+                      key={plant.id}
+                      className={`absolute flex touch-none select-none flex-col items-center rounded-lg p-1 ${
+                        draggingPlantId === plant.id
+                          ? "cursor-grabbing"
+                          : "cursor-grab"
+                      } ${
+                        isSelected
+                          ? "ring-2 ring-[#1e4620] ring-offset-2"
+                          : ""
+                      }`}
                       style={{
-                        backgroundColor:
-                          MARKER_COLORS[plant.color] ?? "#4a7c59",
+                        left: `${plant.x}%`,
+                        top: `${plant.y}%`,
+                        transform: "translate(-50%, -50%)",
                       }}
-                    />
-                    <span className="mt-1 max-w-28 rounded bg-white/90 px-1.5 py-0.5 text-center text-[10px] font-medium leading-tight text-stone-800 shadow-sm">
-                      {plant.commonName}
-                    </span>
-                  </div>
-                ))}
+                      onPointerDown={(event) =>
+                        handleMarkerPointerDown(event, plant.id)
+                      }
+                      onClick={(event) => handleMarkerClick(event, plant.id)}
+                    >
+                      <div
+                        className="h-12 w-12 rounded-full border-2 border-white shadow-md"
+                        style={{
+                          backgroundColor:
+                            MARKER_COLORS[plant.color] ?? "#4a7c59",
+                        }}
+                      />
+                      <span className="mt-1 max-w-28 rounded bg-white/90 px-1.5 py-0.5 text-center text-[10px] font-medium leading-tight text-stone-800 shadow-sm">
+                        {plant.commonName}
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
             )}
 

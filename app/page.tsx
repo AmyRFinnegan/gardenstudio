@@ -14,6 +14,7 @@ export default function Home() {
   const [searchQuery, setSearchQuery] = useState("");
   const [placedPlants, setPlacedPlants] = useState<PlacedPlant[]>([]);
   const [selectedPlant, setSelectedPlant] = useState<Plant | null>(null);
+  const [selectedMarkerId, setSelectedMarkerId] = useState<string | null>(null);
   const [imageBounds, setImageBounds] = useState<ImageBounds | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const photoAreaRef = useRef<HTMLDivElement>(null);
@@ -49,6 +50,20 @@ export default function Home() {
     };
   }, [imageUrl]);
 
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key !== "Delete" && event.key !== "Backspace") return;
+      if (event.target instanceof HTMLInputElement) return;
+      if (!selectedMarkerId) return;
+
+      event.preventDefault();
+      handleDeleteSelectedMarker();
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [selectedMarkerId]);
+
   function openFilePicker() {
     fileInputRef.current?.click();
   }
@@ -64,6 +79,7 @@ export default function Home() {
     setImageUrl(URL.createObjectURL(file));
     setPlacedPlants([]);
     setSelectedPlant(null);
+    setSelectedMarkerId(null);
   }
 
   function handlePlantSelect(plant: Plant) {
@@ -83,27 +99,43 @@ export default function Home() {
     );
   }
 
+  function handleSelectMarker(plantId: string) {
+    setSelectedMarkerId(plantId);
+  }
+
+  function handleDeleteSelectedMarker() {
+    if (!selectedMarkerId) return;
+
+    setPlacedPlants((current) =>
+      current.filter((plant) => plant.id !== selectedMarkerId),
+    );
+    setSelectedMarkerId(null);
+  }
+
   function handlePhotoClick(event: React.MouseEvent<HTMLDivElement>) {
-    if (!selectedPlant || !imageBounds) return;
+    if (selectedPlant && imageBounds) {
+      const overlayRect = event.currentTarget.getBoundingClientRect();
+      const clickX = event.clientX - overlayRect.left;
+      const clickY = event.clientY - overlayRect.top;
 
-    const overlayRect = event.currentTarget.getBoundingClientRect();
-    const clickX = event.clientX - overlayRect.left;
-    const clickY = event.clientY - overlayRect.top;
+      const xPercent = (clickX / overlayRect.width) * 100;
+      const yPercent = (clickY / overlayRect.height) * 100;
 
-    const xPercent = (clickX / overlayRect.width) * 100;
-    const yPercent = (clickY / overlayRect.height) * 100;
+      setPlacedPlants((current) => [
+        ...current,
+        {
+          id: `${selectedPlant.id}-${Date.now()}`,
+          commonName: selectedPlant.commonName,
+          color: selectedPlant.color,
+          x: xPercent,
+          y: yPercent,
+        },
+      ]);
+      setSelectedPlant(null);
+      return;
+    }
 
-    setPlacedPlants((current) => [
-      ...current,
-      {
-        id: `${selectedPlant.id}-${Date.now()}`,
-        commonName: selectedPlant.commonName,
-        color: selectedPlant.color,
-        x: xPercent,
-        y: yPercent,
-      },
-    ]);
-    setSelectedPlant(null);
+    setSelectedMarkerId(null);
   }
 
   return (
@@ -123,6 +155,7 @@ export default function Home() {
         <GardenCanvas
           imageUrl={imageUrl}
           selectedPlant={selectedPlant}
+          selectedMarkerId={selectedMarkerId}
           placedPlants={placedPlants}
           imageBounds={imageBounds}
           fileInputRef={fileInputRef}
@@ -133,6 +166,8 @@ export default function Home() {
           onUpdateImageBounds={updateImageBounds}
           onPhotoClick={handlePhotoClick}
           onUpdatePlacedPlant={handleUpdatePlacedPlant}
+          onSelectMarker={handleSelectMarker}
+          onDeleteSelectedMarker={handleDeleteSelectedMarker}
         />
       </div>
     </div>
